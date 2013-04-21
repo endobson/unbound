@@ -1,30 +1,54 @@
 #lang racket/base
 
-(require racket/match)
+(require racket/match racket/list
+         (for-syntax racket/base
+                     syntax/parse))
 (provide 
-  (struct-out abstraction)
-  (struct-out application)
-  
-  factor? factor-map factor-fold)
+  (rename-out
+    (factor? factor?))
+  define-factor
+  factor-map factor-fold)
+
+(define (factor*? f)
+  (or (primitive-factor? f)
+      (factor? f)))
+
+(define (primitive-factor? f)
+  (match f
+    [(list (? factor*?) ...) #t]
+    [_ #f]))
 
 
-(struct factor ())
+(struct factor () #:transparent)
 
-(struct application factor (fun arg) #:transparent)
-(struct abstraction factor (bound-body) #:transparent)
+(define-values (prop:constructor
+                constructor?
+                constructor)
+  (make-struct-type-property 'constructor))
+
+
+(define-syntax define-factor
+  (syntax-parser
+    [(_ name:id (field:id ...))
+
+     #'(begin
+         (struct name factor (field ...) #:transparent
+                 #:property prop:constructor (λ (field ...) (name field ...)))
+         )]))
 
 
 (define (factor-map t f)
   (match t
-    [(application fun arg)
-     (application (f fun) (f arg))]
-    [(abstraction bound-body)
-     (abstraction (f bound-body))]))
+    [(? list?)
+     (map f t)]
+    [(? factor?)
+     (apply (constructor t)
+            (map f (rest (vector->list (struct->vector t)))))]))
 
 (define (factor-fold t f acc)
   (match t
-    [(application fun arg)
-     (f arg (f fun acc))]
-    [(abstraction bound-body)
-     (f bound-body)]))
+    [(or (? list? l)
+         (? factor? (app (λ (t) (rest (vector->list (struct->vector t)))) l)))
+     (for/fold ((acc acc)) ((t l))
+       (f t acc))]))
 

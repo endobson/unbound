@@ -7,7 +7,10 @@
   bound-var
   var?
   bind
+  (rename-out
+    (open unbind))
   embed
+  substitute
   
   )
 
@@ -20,8 +23,26 @@
 
 (struct binding (bound-pattern term) #:transparent)
 (struct embed (term))
-(struct rebinding (pattern term))
+(struct rebinding (binder body))
 (struct rec-binding (pattern))
+
+(define (substitute arg name term)
+  (define (recur f)
+    (match f
+      [(== name) arg]
+      [(? free-var?) f]
+      [(? factor?)
+       (factor-map f recur)]
+      [(binding pat term)
+       (binding (recur pat) (recur term))]
+      [(embed t)
+       (embed (recur t))]
+      [(rec-binding pat)
+       (rec-binding (recur pat))]
+      [(rebinding p1 p2)
+       (rebinding (recur p1) (recur p2))]
+      [(? bound-var?) f]))
+  (recur term))
 
 
 (define (pattern? t)
@@ -51,7 +72,7 @@
 (define (bind pattern term)
   (define name-map (pattern-name-map pattern))
   (binding (close-pattern pattern name-map)
-           (close term name-map)))
+           (close-term term name-map)))
 
 (define (rebind p1 p2)
   (define name-map (pattern-name-map p1))
@@ -69,7 +90,7 @@
 (define (unrec-bind b)
   (match-define (rec-binding p) b)
   (define name-map (pattern-fresh-name-map p))
-  (values p1 (open-pattern p1 name-map)))
+  (values p (open-pattern p name-map)))
 
 
 (define (pattern-name-map pat)
@@ -88,7 +109,7 @@
     (values name index)))
 
 (define (pattern-fresh-name-map p)
-  (define name-map (pattern-name-map pattern))
+  (define name-map (pattern-name-map p))
   (for/hash (((k v) name-map))
     (values v (gensym k))))
 
@@ -105,7 +126,7 @@
     (recur bp 0))
 
   (for/hash ((index (bound-pattern-size bp)))
-    (values index (gensym))))
+    (values index (free-var (gensym)))))
 
 
 
@@ -115,61 +136,62 @@
   (define name-map (bound-pattern-fresh-name-map bp))
   (values
     (open-pattern bp name-map)
-    (open t name-map)))
+    (open-term t name-map)))
 
-(define-values (open open-pattern)
-  (define (replacers name-map)
-    (define ((replace k) t)
-      (match t
-        [(free-var _) t]
-        [(bound-var (== k) i) (hash-ref name-map i)]
-        [(bound-var _ _) t]
-        [(binding bp t)
-         (binding 
-           ((replace-bound-pattern k) bp)
-           ((replace (add1 k)) t))]
-        [(? factor?)
-         (factor-map t (replace k))]))
-    (define ((replace-bound-pattern k) t)
-      (match t
-        [(bound-var _ _) t]
-        [(embed t) (embed ((replace k) t))]
-        [(rebinding p1 p2)
-         (rebinding
-           ((replace-bound-pattern k) p1)
-           ((replace-bound-pattern (add1 k)) p2))]
-        [(rec-binding p)
-         (rec-binding ((replace-bound-pattern (add1 k)) p))]
-        [(? factor?)
-         (factor-map t (replace-bound-pattern k))]))
-    (define ((replace-pattern k) t)
-      (match t
-        [(bound-var (== k) i) (hash-ref name-map i)]
-        [(embed t) (embed ((replace k) t))]
-        [(rebinding p1 p2)
-         (rebinding
-           ((replace-pattern k) p1)
-           ((replace-pattern (add1 k)) p2))]
-        [(rec-binding p)
-         (rec-binding ((replace-pattern (add1 k)) p))]
-        [(? factor?)
-         (factor-map t (replace-pattern k))]))
+(define-values (open-term open-pattern)
+  (let ()
+    (define (replacers name-map)
+      (define ((replace k) t)
+        (match t
+          [(free-var _) t]
+          [(bound-var (== k) i) (hash-ref name-map i)]
+          [(bound-var _ _) t]
+          [(binding bp t)
+           (binding 
+             ((replace-bound-pattern k) bp)
+             ((replace (add1 k)) t))]
+          [(? factor?)
+           (factor-map t (replace k))]))
+      (define ((replace-bound-pattern k) t)
+        (match t
+          [(bound-var _ _) t]
+          [(embed t) (embed ((replace k) t))]
+          [(rebinding p1 p2)
+           (rebinding
+             ((replace-bound-pattern k) p1)
+             ((replace-bound-pattern (add1 k)) p2))]
+          [(rec-binding p)
+           (rec-binding ((replace-bound-pattern (add1 k)) p))]
+          [(? factor?)
+           (factor-map t (replace-bound-pattern k))]))
+      (define ((replace-pattern k) t)
+        (match t
+          [(bound-var (== k) i) (hash-ref name-map i)]
+          [(embed t) (embed ((replace k) t))]
+          [(rebinding p1 p2)
+           (rebinding
+             ((replace-pattern k) p1)
+             ((replace-pattern (add1 k)) p2))]
+          [(rec-binding p)
+           (rec-binding ((replace-pattern (add1 k)) p))]
+          [(? factor?)
+           (factor-map t (replace-pattern k))]))
+      (values
+        (replace 0)
+        (replace-pattern 0)))
+
     (values
-      (replace 0 t)
-      (replace-pattern 0 bp)))
-
-  (values
-    (lambda (t)
-      (let-values (((replace replace-pattern) (replacers name-map)))
-        ((replace 0) t)))
-    (lambda (bp)
-      (let-values (((replace replace-pattern) (replacers name-map)))
-        ((replace-pattern 0) bp)))))
+      (lambda (t name-map)
+        (let-values (((replace replace-pattern) (replacers name-map)))
+          (replace t)))
+      (lambda (bp name-map)
+        (let-values (((replace replace-pattern) (replacers name-map)))
+          (replace-pattern bp))))))
 
 
 
 
-(define-values (close close-pattern)
+(define-values (close-term close-pattern)
   (let ()
     (define (replacers name-map)
       (define ((replace-pattern k) bp)

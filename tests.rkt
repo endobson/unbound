@@ -11,21 +11,43 @@
 
 (define (lam x t)
   (abstraction (bind x t)))
-(define (app t s)
-  (application t s))
+(define (app s t)
+  (application s t))
+
+(define-match-expander app:
+  (syntax-parser
+    [(_ s t)
+     #'(application s t)]))
+
+(define-match-expander lam:
+  (syntax-parser
+    [(_ name body) 
+     #'(abstraction (bind: name body))]))
+
+(define (value? arg)
+  (abstraction? arg))
+    
+
 
 (define (single-step t)
   (match t
-    [(application (abstraction bound-body)
-                  (? abstraction? arg))
-     (define-values (name body) (unbind bound-body))
+    [(app: (lam: name body) (? value? arg))
      (substitute arg name body)]))
 
-(equal?
-  (lam (free-var 'n) (free-var 'n))
-  (lam (free-var 'x) (free-var 'x)))
-(equal? 
-  (lam (free-var 'x) (lam (free-var 'y) (app (free-var 'x) (free-var 'y))))
-  (lam (free-var 'y) (lam (free-var 'x) (app (free-var 'y) (free-var 'x)))))
+(define x (free-var 'x))
+(define y (free-var 'y))
+(define z (free-var 'z))
 
-(single-step (app (lam (free-var 'x) (free-var 'x)) (lam (free-var 'y) (free-var 'y))))
+(equal?
+  (lam y y)
+  (lam x x))
+(equal? 
+  (lam x (lam y (app x y)))
+  (lam y (lam x (app y x))))
+
+(equal? 
+  (single-step (app (lam x x) (lam y y)))
+  (lam z z))
+
+
+

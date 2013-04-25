@@ -1,12 +1,14 @@
 #lang racket/base
 
-(require racket/set racket/match "factors.rkt")
+(require racket/set racket/match "factors.rkt"
+         (for-syntax racket/base syntax/parse))
 
 (provide
   free-var
   bound-var
   var?
   bind
+  bind:
   (rename-out
     (open unbind))
   embed
@@ -25,6 +27,14 @@
 (struct embed (term))
 (struct rebinding (binder body))
 (struct rec-binding (pattern))
+
+
+(define-match-expander bind:
+  (syntax-parser
+    [(_ pattern term)
+     #'(app (lambda (b) (call-with-values (lambda () (open b)) list))
+            (list pattern term))]))
+
 
 (define (substitute arg name term)
   (define (recur f)
@@ -137,6 +147,7 @@
   (values
     (open-pattern bp name-map)
     (open-term t name-map)))
+
 
 (define-values (open-term open-pattern)
   (let ()
